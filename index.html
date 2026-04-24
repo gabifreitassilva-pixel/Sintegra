@@ -227,7 +227,7 @@
                 </tr>
             </thead>
             <tbody id="history-list">
-                <tr><td colspan="3" style="text-align:center; padding:20px; color:#ffffff;">Nenhum histórico na sessão atual.</td></tr>
+                <tr><td colspan="3" style="text-align:center; padding:20px; color:#ffffff;">Aguardando sistema...</td></tr>
             </tbody>
         </table>
     </div>
@@ -260,7 +260,7 @@
     const pdfjs = window['pdfjs-dist/build/pdf'];
     pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
-    // --- Lógica do Firebase (Configurada para não travar o código principal) ---
+    // --- Lógica do Firebase ---
     let db = null;
     let auth = null;
     let appId = 'sintegra-monitor-default';
@@ -282,15 +282,20 @@
                     await auth.signInAnonymously();
                 }
                 isCloudActive = true;
+            } else {
+                renderHistoryTable(localHistory);
             }
-        } catch (e) { console.warn("Modo local ativo."); }
+        } catch (e) { 
+            console.warn("Modo local ativo."); 
+            renderHistoryTable(localHistory);
+        }
     }
 
     // --- Funções de Interface do Histórico ---
     function renderHistoryTable(docs) {
         historyList.innerHTML = "";
         if (docs.length === 0) {
-            historyList.innerHTML = "<tr><td colspan='3' style='text-align:center; padding:20px; color:white;'>Nenhum histórico encontrado.</td></tr>";
+            historyList.innerHTML = "<tr><td colspan='3' style='text-align:center; padding:20px; color:white;'>Nenhum histórico salvo nesta sessão.</td></tr>";
             return;
         }
 
@@ -334,7 +339,7 @@
             historyContainer.classList.add('hidden');
             resultsArea.classList.remove('hidden');
             renderResults();
-            status.innerText = "Relatório carregado com sucesso.";
+            status.innerText = "Relatório carregado do histórico.";
             resultsArea.scrollIntoView({ behavior: 'smooth' });
         }
     }
