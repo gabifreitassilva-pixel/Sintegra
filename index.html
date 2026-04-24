@@ -10,15 +10,14 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, addDoc, getDocs, query, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, addDoc, getDocs, query, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Variáveis de ambiente fornecidas pelo Canvas (se existirem)
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'sintegra-pro-default';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'sintegra-pro-2026';
         const authToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         window.firebaseData = { appId, config: firebaseConfig, authToken };
-        window.fbSDK = { addDoc, collection, getDocs, doc, query };
+        window.fbSDK = { addDoc, collection, getDocs, doc, query, deleteDoc };
     </script>
 
     <style>
@@ -32,6 +31,7 @@
             --no: #FF0000;
             --blue: #00D1FF;
             --gray-btn: #222222;
+            --red-delete: #cc0000;
         }
 
         body {
@@ -83,7 +83,7 @@
         #process-btn.active { background: var(--yes); color: black; }
         #process-btn:disabled { background: #444; color: #888; cursor: not-allowed; }
 
-        /* Estilos do Histórico (Estilo Planilha Excel) */
+        /* Estilos do Histórico */
         .history-section {
             background: #0a0a0a;
             border: 1px solid var(--gray-border);
@@ -120,7 +120,7 @@
 
         .action-btns {
             display: flex;
-            gap: 15px;
+            gap: 12px;
             justify-content: center;
         }
 
@@ -128,18 +128,20 @@
             background: var(--blue);
             color: #000;
             border-radius: 50%;
-            width: 38px;
-            height: 38px;
+            width: 34px;
+            height: 34px;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
             border: none;
-            font-size: 20px;
+            font-size: 18px;
             transition: all 0.2s;
         }
         .btn-circle:hover { transform: scale(1.15); filter: brightness(1.2); }
         .btn-pdf { background: #ffffff; }
+        .btn-delete { background: var(--red-delete); color: #ffffff; }
+        .btn-delete:hover { background: #ff0000; }
 
         .company-block {
             background: var(--card-bg);
@@ -234,14 +236,14 @@
     <div id="history-container" class="history-section no-print hidden">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 10px;">
             <h2 style="font-size: 1.1em; color: var(--orange); margin: 0;">Relatórios Arquivados</h2>
-            <button class="btn" style="padding: 5px 15px; font-size: 12px;" onclick="closeHistory()">Voltar</button>
+            <button class="btn" style="padding: 5px 15px; font-size: 12px;" onclick="window.closeHistory()">Voltar</button>
         </div>
         <table class="history-table">
             <thead>
                 <tr>
-                    <th style="width: 45%;">Sintegra Enviados</th>
-                    <th style="width: 35%;">Referente ao mês</th>
-                    <th style="width: 20%; text-align: center;">Ação</th>
+                    <th style="width: 40%;">Sintegra Enviados</th>
+                    <th style="width: 30%;">Referente ao mês</th>
+                    <th style="width: 30%; text-align: center;">Ação</th>
                 </tr>
             </thead>
             <tbody id="history-list">
@@ -258,7 +260,7 @@
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, collection, doc, addDoc, getDocs, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getFirestore, collection, doc, addDoc, getDocs, query, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const OBRIGATORIOS = ["AC", "AM", "AP", "DF", "ES", "MA", "MG", "PA", "PI", "PR", "SC"];
     let consolidado = {};
@@ -277,13 +279,13 @@
     const status = document.getElementById('status-msg');
     const printArea = document.getElementById('print-area');
 
-    // --- BANCO DE DADOS LOCAL (IndexedDB) para persistência no GitHub/Navegador ---
-    const dbName = "SintegraDB";
-    const storeName = "Relatorios";
+    // --- BANCO DE DADOS LOCAL (IndexedDB) para persistência ---
+    const dbName = "SintegraDatabase";
+    const storeName = "SintegraHistory";
 
     function openLocalDB() {
         return new Promise((resolve, reject) => {
-            const request = indexedDB.open(dbName, 1);
+            const request = indexedDB.open(dbName, 2);
             request.onupgradeneeded = (e) => {
                 const db = e.target.result;
                 if (!db.objectStoreNames.contains(storeName)) {
@@ -302,6 +304,13 @@
         return new Promise((res) => tx.oncomplete = res);
     }
 
+    async function deleteLocal(id) {
+        const db = await openLocalDB();
+        const tx = db.transaction(storeName, "readwrite");
+        tx.objectStore(storeName).delete(id);
+        return new Promise((res) => tx.oncomplete = res);
+    }
+
     async function getLocal() {
         const db = await openLocalDB();
         const tx = db.transaction(storeName, "readonly");
@@ -312,9 +321,9 @@
 
     // --- INICIALIZAÇÃO FIREBASE (MODULAR) ---
     async function initFirebase() {
-        const { config, authToken, appId } = window.firebaseData;
+        const { config, authToken } = window.firebaseData;
         if (!config) {
-            console.warn("Ambiente local detectado. Usando armazenamento do navegador.");
+            console.warn("Nuvem indisponível. Usando IndexedDB local.");
             loadHistory();
             return;
         }
@@ -324,11 +333,8 @@
             auth = getAuth(app);
             db = getFirestore(app);
 
-            if (authToken) {
-                await signInWithCustomToken(auth, authToken);
-            } else {
-                await signInAnonymously(auth);
-            }
+            if (authToken) await signInWithCustomToken(auth, authToken);
+            else await signInAnonymously(auth);
 
             onAuthStateChanged(auth, (user) => {
                 if (user) {
@@ -353,20 +359,18 @@
     async function loadHistory() {
         let docs = [];
         
-        // Tenta buscar da nuvem primeiro
         if (db && userId) {
             try {
                 const appId = window.firebaseData.appId;
                 const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'history');
                 const snap = await getDocs(query(colRef));
-                snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+                snap.forEach(d => docs.push({ id: d.id, ...d.data(), isCloud: true }));
             } catch (e) { console.error("Cloud load fail", e); }
         }
 
-        // Busca do local para complementar ou substituir
         const locals = await getLocal();
         locals.forEach(l => {
-            if (!docs.find(d => d.id === l.id)) docs.push(l);
+            if (!docs.find(d => d.id === l.id)) docs.push({ ...l, isCloud: false });
         });
 
         docs.sort((a, b) => b.timestamp - a.timestamp);
@@ -390,6 +394,7 @@
                     <div class="action-btns">
                         <button class="btn-circle" onclick="window.viewReport('${data.id}')" title="Visualizar Detalhes">👁️</button>
                         <button class="btn-circle btn-pdf" onclick="window.printReport('${data.id}')" title="Gerar PDF">📄</button>
+                        <button class="btn-circle btn-delete" onclick="window.deleteReport('${data.id}')" title="Excluir">🗑️</button>
                     </div>
                 </td>
             `;
@@ -405,7 +410,7 @@
             historyContainer.classList.add('hidden');
             resultsArea.classList.remove('hidden');
             renderResults();
-            status.innerText = "Histórico carregado.";
+            status.innerText = "Monitoramento carregado.";
             resultsArea.scrollIntoView({ behavior: 'smooth' });
         }
     };
@@ -419,20 +424,39 @@
         }
     };
 
+    window.deleteReport = async function(id) {
+        const confirmDelete = confirm("Tem a certeza que deseja excluir este relatório permanentemente?");
+        if (!confirmDelete) return;
+
+        // Eliminar do local
+        await deleteLocal(id);
+
+        // Eliminar da nuvem se existir
+        if (db && userId) {
+            try {
+                const appId = window.firebaseData.appId;
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'history', id);
+                await deleteDoc(docRef);
+            } catch (e) { console.warn("Erro ao eliminar da nuvem, mas removido localmente."); }
+        }
+
+        status.innerText = "Relatório excluído.";
+        loadHistory();
+    };
+
     async function autoSave() {
         const first = Object.values(consolidado)[0];
         const ref = first ? first.periodo : "N/A";
+        const docId = 'sintegra_' + Date.now();
         const docObj = {
-            id: 'sintegra_' + Date.now(),
+            id: docId,
             timestamp: Date.now(),
             globalPeriodo: ref,
             consolidado: JSON.parse(JSON.stringify(consolidado))
         };
 
-        // Salva Local (Sempre)
         await saveLocal(docObj);
 
-        // Salva Nuvem (Se houver config)
         if (db && userId) {
             try {
                 const appId = window.firebaseData.appId;
@@ -485,7 +509,6 @@
                 return;
             }
 
-            // Consultar APIs de regime
             for (let i = 0; i < cnpjs.length; i += 5) {
                 const batch = cnpjs.slice(i, i + 5);
                 status.innerText = `Consultando empresas... (${Math.min(i + 5, cnpjs.length)}/${cnpjs.length})`;
@@ -540,7 +563,8 @@
                 consolidado[cnpj].inscricaoEstadual = ieFound;
             }
 
-            const ufRegex = /Estado:\s*([A-Z]{2})/g;
+            // Busca flexível de Estados
+            const ufRegex = /(?:Estado|UF|Estado:)\s*([A-Z]{2})/gi;
             let m;
             while ((m = ufRegex.exec(textoDepois)) !== null) {
                 const uf = m[1].toUpperCase();
@@ -647,7 +671,7 @@
     }
 
     historyBtn.onclick = () => {
-        historyContainer.classList.remove('hidden');
+        historyContainer.classList.toggle('hidden');
         resultsArea.classList.add('hidden');
         loadHistory();
     };
