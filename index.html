@@ -83,7 +83,6 @@
         #process-btn.active { background: var(--yes); color: black; }
         #process-btn:disabled { background: #444; color: #888; cursor: not-allowed; }
 
-        /* Estilos do Histórico */
         .history-section {
             background: #0a0a0a;
             border: 1px solid var(--gray-border);
@@ -262,7 +261,9 @@
     import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
     import { getFirestore, collection, doc, addDoc, getDocs, query, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
+    // Lista de Estados Obrigatórios definitiva
     const OBRIGATORIOS = ["AC", "AM", "AP", "DF", "ES", "MA", "MG", "PA", "PI", "PR", "SC"];
+    
     let consolidado = {};
     let arquivos = [];
     let db = null;
@@ -279,7 +280,7 @@
     const status = document.getElementById('status-msg');
     const printArea = document.getElementById('print-area');
 
-    // --- BANCO DE DADOS LOCAL (IndexedDB) para persistência ---
+    // --- BANCO DE DADOS LOCAL (IndexedDB) ---
     const dbName = "SintegraDatabase";
     const storeName = "SintegraHistory";
 
@@ -319,11 +320,10 @@
         return new Promise((res) => request.onsuccess = () => res(request.result));
     }
 
-    // --- INICIALIZAÇÃO FIREBASE (MODULAR) ---
+    // --- INICIALIZAÇÃO FIREBASE ---
     async function initFirebase() {
         const { config, authToken } = window.firebaseData;
         if (!config) {
-            console.warn("Nuvem indisponível. Usando IndexedDB local.");
             loadHistory();
             return;
         }
@@ -358,7 +358,6 @@
 
     async function loadHistory() {
         let docs = [];
-        
         if (db && userId) {
             try {
                 const appId = window.firebaseData.appId;
@@ -428,18 +427,14 @@
         const confirmDelete = confirm("Tem a certeza que deseja excluir este relatório permanentemente?");
         if (!confirmDelete) return;
 
-        // Eliminar do local
         await deleteLocal(id);
-
-        // Eliminar da nuvem se existir
         if (db && userId) {
             try {
                 const appId = window.firebaseData.appId;
                 const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'history', id);
                 await deleteDoc(docRef);
-            } catch (e) { console.warn("Erro ao eliminar da nuvem, mas removido localmente."); }
+            } catch (e) { console.warn("Erro ao eliminar da nuvem."); }
         }
-
         status.innerText = "Relatório excluído.";
         loadHistory();
     };
@@ -454,15 +449,13 @@
             globalPeriodo: ref,
             consolidado: JSON.parse(JSON.stringify(consolidado))
         };
-
         await saveLocal(docObj);
-
         if (db && userId) {
             try {
                 const appId = window.firebaseData.appId;
                 const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'history');
                 await addDoc(colRef, docObj);
-            } catch (e) { console.warn("Cloud save fail", e); }
+            } catch (e) {}
         }
         loadHistory();
     }
@@ -563,7 +556,6 @@
                 consolidado[cnpj].inscricaoEstadual = ieFound;
             }
 
-            // Busca flexível de Estados
             const ufRegex = /(?:Estado|UF|Estado:)\s*([A-Z]{2})/gi;
             let m;
             while ((m = ufRegex.exec(textoDepois)) !== null) {
@@ -603,8 +595,8 @@
     function renderResults() {
         resultsArea.innerHTML = "";
         const empresas = Object.values(consolidado).sort((a, b) => {
-            const aT = Object.entries(a.ufs).some(([u, i]) => OBRIGATORIOS.includes(u) && a.isSimples && i.temIE);
-            const bT = Object.entries(b.ufs).some(([u, i]) => OBRIGATORIOS.includes(u) && b.isSimples && i.temIE);
+            const aT = Object.entries(a.ufs).some(([u, i]) => OBRIGATORIOS.includes(u) && a.isSimples && (i.temIE || !!a.inscricaoEstadual));
+            const bT = Object.entries(b.ufs).some(([u, i]) => OBRIGATORIOS.includes(u) && b.isSimples && (i.temIE || !!b.inscricaoEstadual));
             return (bT ? 1 : 0) - (aT ? 1 : 0);
         });
 
@@ -612,10 +604,16 @@
             const block = document.createElement('div');
             block.className = 'company-block';
             let ufsHtml = "";
+            let qtdSim = 0;
+
             Object.entries(emp.ufs).sort().forEach(([uf, info]) => {
                 const obr = OBRIGATORIOS.includes(uf);
-                const isSim = obr && emp.isSimples && info.temIE;
-                let razao = !obr ? "UF Dispensada" : (!emp.isSimples ? "Lucro Presumido" : (!info.temIE ? "Sem IE Detectada" : ""));
+                const temIE = info.temIE || !!emp.inscricaoEstadual;
+                const isSim = obr && emp.isSimples && temIE;
+                
+                if (isSim) qtdSim++;
+
+                let razao = !obr ? "UF Dispensada" : (!emp.isSimples ? "Lucro Presumido" : (!temIE ? "Sem IE Detectada" : ""));
 
                 ufsHtml += `
                     <div class="uf-card">
@@ -635,7 +633,7 @@
                 <div class="company-header">
                     <div>
                         <h3 class="company-title">${emp.nome}</h3>
-                        <small style="color: #ffffff; font-weight: bold; font-size: 0.85em;">CNPJ: ${emp.cnpj}${emp.inscricaoEstadual ? ` | IE: ${emp.inscricaoEstadual}` : ""}</small>
+                        <small style="color: #ffffff; font-weight: bold; font-size: 0.85em;">CNPJ: ${emp.cnpj}${emp.inscricaoEstadual ? ` | IE: ${emp.inscricaoEstadual}` : ""} | <span style="color: var(--orange)">QTD: ${qtdSim}</span></small>
                     </div>
                     <div>
                         <span class="badge badge-regime">${emp.regime || 'Simples Nacional'}</span>
@@ -652,8 +650,11 @@
         printArea.innerHTML = "";
         Object.values(consolidado).forEach(emp => {
             let ufsTxt = [];
+            let qtdSim = 0;
             Object.entries(emp.ufs).sort().forEach(([uf, info]) => {
-                if (OBRIGATORIOS.includes(uf) && emp.isSimples && info.temIE) {
+                const temIE = info.temIE || !!emp.inscricaoEstadual;
+                if (OBRIGATORIOS.includes(uf) && emp.isSimples && temIE) {
+                    qtdSim++;
                     ufsTxt.push(`${uf}${(info.gerado && info.enviado) ? " ✅" : ""}`);
                 }
             });
@@ -662,7 +663,7 @@
                 printArea.innerHTML += `
                     <div class="print-company">
                         <h3>${emp.nome}</h3>
-                        <p>CNPJ: ${emp.cnpj}${ieDisp} | Regime: ${emp.regime || 'Simples Nacional'} | Referência: ${emp.periodo}</p>
+                        <p>CNPJ: ${emp.cnpj}${ieDisp} | QTD: ${qtdSim} | Regime: ${emp.regime || 'Simples Nacional'} | Referência: ${emp.periodo}</p>
                         <p class="print-status"><strong>ENTREGA PARA: ${ufsTxt.join(' | ') || 'NENHUMA'}</strong></p>
                     </div>
                 `;
