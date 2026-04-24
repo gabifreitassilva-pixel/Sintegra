@@ -6,10 +6,20 @@
     <title>Sintegra Pro 2026</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     
-    <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
+    <!-- Firebase Modular SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, addDoc, getDocs, query, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Variáveis de ambiente fornecidas pelo Canvas (se existirem)
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'sintegra-pro-default';
+        const authToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        window.firebaseData = { appId, config: firebaseConfig, authToken };
+        window.fbSDK = { addDoc, collection, getDocs, doc, query };
+    </script>
 
     <style>
         :root {
@@ -73,7 +83,7 @@
         #process-btn.active { background: var(--yes); color: black; }
         #process-btn:disabled { background: #444; color: #888; cursor: not-allowed; }
 
-        /* Estilos do Histórico */
+        /* Estilos do Histórico (Estilo Planilha Excel) */
         .history-section {
             background: #0a0a0a;
             border: 1px solid var(--gray-border);
@@ -85,7 +95,7 @@
         .history-table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 10px;
+            margin-top: 15px;
             background: #0f0f0f;
         }
 
@@ -96,7 +106,7 @@
             padding: 12px;
             font-size: 0.85em;
             text-transform: uppercase;
-            background: #151515;
+            background: #1c1c1c;
         }
 
         .history-table td {
@@ -108,21 +118,24 @@
 
         .history-table tr:hover { background: #1a1a1a; }
 
-        .action-btns { display: flex; gap: 12px; justify-content: center; }
+        .action-btns {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
 
         .btn-circle {
-            padding: 0;
             background: var(--blue);
             color: #000;
             border-radius: 50%;
-            width: 36px;
-            height: 36px;
+            width: 38px;
+            height: 38px;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
             border: none;
-            font-size: 18px;
+            font-size: 20px;
             transition: all 0.2s;
         }
         .btn-circle:hover { transform: scale(1.15); filter: brightness(1.2); }
@@ -206,18 +219,23 @@
         <div id="clock" class="no-print" style="font-family: monospace; font-size: 0.9em; color: white;"></div>
     </header>
 
-    <div class="upload-section no-print">
-        <input type="file" id="pdf-input" accept=".pdf" multiple hidden>
-        <label for="pdf-input" class="btn">Selecionar PDFs</label>
-        <button id="process-btn" class="btn btn-secondary" disabled>Processar</button>
-        <button id="print-btn" class="btn hidden" style="background: #ffffff; color: black; margin-left: 10px;">🖨️ Imprimir e Salvar</button>
-        <button id="toggle-history" class="btn btn-history">📜 Relatórios Salvos</button>
-        <p id="status-msg" style="margin-top: 10px; color: #ffffff; min-height: 1em; font-weight: bold;"></p>
+    <div id="main-ui" class="no-print">
+        <div class="upload-section">
+            <input type="file" id="pdf-input" accept=".pdf" multiple hidden>
+            <label for="pdf-input" class="btn">Selecionar PDFs</label>
+            <button id="process-btn" class="btn btn-secondary" disabled>Processar</button>
+            <button id="print-btn" class="btn hidden" style="background: #ffffff; color: black; margin-left: 10px;">🖨️ Imprimir e Salvar</button>
+            <button id="toggle-history" class="btn btn-history">📜 Relatórios Salvos</button>
+            <p id="status-msg" style="margin-top: 10px; color: #ffffff; min-height: 1em; font-weight: bold;"></p>
+        </div>
     </div>
 
     <!-- Seção de Histórico -->
     <div id="history-container" class="history-section no-print hidden">
-        <h2 style="font-size: 1.1em; color: var(--orange); margin-top: 0; border-bottom: 1px solid #333; padding-bottom: 10px;">Relatórios Arquivados</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 10px;">
+            <h2 style="font-size: 1.1em; color: var(--orange); margin: 0;">Relatórios Arquivados</h2>
+            <button class="btn" style="padding: 5px 15px; font-size: 12px;" onclick="closeHistory()">Voltar</button>
+        </div>
         <table class="history-table">
             <thead>
                 <tr>
@@ -227,7 +245,7 @@
                 </tr>
             </thead>
             <tbody id="history-list">
-                <tr><td colspan="3" style="text-align:center; padding:20px; color:#ffffff;">Aguardando sistema...</td></tr>
+                <tr><td colspan="3" style="text-align:center; padding:20px; color:#ffffff;">Carregando registros...</td></tr>
             </tbody>
         </table>
     </div>
@@ -237,65 +255,128 @@
     <div id="print-area" class="print-only"></div>
 </div>
 
-<script>
-    // --- Lógica de Variáveis Globais ---
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, doc, addDoc, getDocs, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
     const OBRIGATORIOS = ["AC", "AM", "AP", "DF", "ES", "GO", "MA", "MG", "PA", "PI", "PR", "SC"];
     let consolidado = {};
     let arquivos = [];
-    let localHistory = []; // Armazena relatórios na sessão para uso fora do Canvas
-    let isCloudActive = false;
+    let db = null;
+    let auth = null;
+    let userId = null;
 
-    // --- Elementos do DOM ---
     const input = document.getElementById('pdf-input');
     const procBtn = document.getElementById('process-btn');
     const printBtn = document.getElementById('print-btn');
     const historyBtn = document.getElementById('toggle-history');
     const historyContainer = document.getElementById('history-container');
     const historyList = document.getElementById('history-list');
-    const status = document.getElementById('status-msg');
     const resultsArea = document.getElementById('results');
+    const status = document.getElementById('status-msg');
     const printArea = document.getElementById('print-area');
 
-    // --- PDF.js Setup ---
-    const pdfjs = window['pdfjs-dist/build/pdf'];
-    pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+    // --- BANCO DE DADOS LOCAL (IndexedDB) para persistência no GitHub/Navegador ---
+    const dbName = "SintegraDB";
+    const storeName = "Relatorios";
 
-    // --- Lógica do Firebase ---
-    let db = null;
-    let auth = null;
-    let appId = 'sintegra-monitor-default';
-
-    async function initCloud() {
-        try {
-            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                const firebaseConfig = JSON.parse(__firebase_config);
-                if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-                db = firebase.firestore();
-                auth = firebase.auth();
-                if (typeof __app_id !== 'undefined') appId = __app_id;
-                
-                auth.onAuthStateChanged((user) => { if (user) loadHistory(); });
-                
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await auth.signInWithCustomToken(__initial_auth_token);
-                } else {
-                    await auth.signInAnonymously();
+    function openLocalDB() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(dbName, 1);
+            request.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains(storeName)) {
+                    db.createObjectStore(storeName, { keyPath: "id" });
                 }
-                isCloudActive = true;
+            };
+            request.onsuccess = (e) => resolve(e.target.result);
+            request.onerror = (e) => reject(e.target.error);
+        });
+    }
+
+    async function saveLocal(data) {
+        const db = await openLocalDB();
+        const tx = db.transaction(storeName, "readwrite");
+        tx.objectStore(storeName).put(data);
+        return new Promise((res) => tx.oncomplete = res);
+    }
+
+    async function getLocal() {
+        const db = await openLocalDB();
+        const tx = db.transaction(storeName, "readonly");
+        const store = tx.objectStore(storeName);
+        const request = store.getAll();
+        return new Promise((res) => request.onsuccess = () => res(request.result));
+    }
+
+    // --- INICIALIZAÇÃO FIREBASE (MODULAR) ---
+    async function initFirebase() {
+        const { config, authToken, appId } = window.firebaseData;
+        if (!config) {
+            console.warn("Ambiente local detectado. Usando armazenamento do navegador.");
+            loadHistory();
+            return;
+        }
+
+        try {
+            const app = initializeApp(config);
+            auth = getAuth(app);
+            db = getFirestore(app);
+
+            if (authToken) {
+                await signInWithCustomToken(auth, authToken);
             } else {
-                renderHistoryTable(localHistory);
+                await signInAnonymously(auth);
             }
-        } catch (e) { 
-            console.warn("Modo local ativo."); 
-            renderHistoryTable(localHistory);
+
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    userId = user.uid;
+                    loadHistory();
+                }
+            });
+        } catch (e) {
+            console.error("Firebase Error:", e);
+            loadHistory();
         }
     }
 
-    // --- Funções de Interface do Histórico ---
+    initFirebase();
+
+    // --- LÓGICA DE HISTÓRICO ---
+    window.closeHistory = function() {
+        historyContainer.classList.add('hidden');
+        if (Object.keys(consolidado).length > 0) resultsArea.classList.remove('hidden');
+    };
+
+    async function loadHistory() {
+        let docs = [];
+        
+        // Tenta buscar da nuvem primeiro
+        if (db && userId) {
+            try {
+                const appId = window.firebaseData.appId;
+                const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'history');
+                const snap = await getDocs(query(colRef));
+                snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+            } catch (e) { console.error("Cloud load fail", e); }
+        }
+
+        // Busca do local para complementar ou substituir
+        const locals = await getLocal();
+        locals.forEach(l => {
+            if (!docs.find(d => d.id === l.id)) docs.push(l);
+        });
+
+        docs.sort((a, b) => b.timestamp - a.timestamp);
+        renderHistoryTable(docs);
+    }
+
     function renderHistoryTable(docs) {
         historyList.innerHTML = "";
         if (docs.length === 0) {
-            historyList.innerHTML = "<tr><td colspan='3' style='text-align:center; padding:20px; color:white;'>Nenhum histórico salvo nesta sessão.</td></tr>";
+            historyList.innerHTML = "<tr><td colspan='3' style='text-align:center; padding:20px; color:white;'>Nenhum relatório salvo.</td></tr>";
             return;
         }
 
@@ -307,8 +388,8 @@
                 <td style="color: #ffffff;">${data.globalPeriodo || "N/A"}</td>
                 <td style="text-align: center;">
                     <div class="action-btns">
-                        <button class="btn-circle" onclick="visualizarRelatorio('${data.id}')" title="Visualizar Detalhes">👁️</button>
-                        <button class="btn-circle btn-pdf" onclick="imprimirSalvo('${data.id}')" title="Gerar PDF">📄</button>
+                        <button class="btn-circle" onclick="window.viewReport('${data.id}')" title="Visualizar Detalhes">👁️</button>
+                        <button class="btn-circle btn-pdf" onclick="window.printReport('${data.id}')" title="Gerar PDF">📄</button>
                     </div>
                 </td>
             `;
@@ -317,65 +398,52 @@
         window._historyCache = docs;
     }
 
-    async function loadHistory() {
-        if (isCloudActive && db) {
-            try {
-                const col = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('history');
-                const snapshot = await col.get();
-                const docs = [];
-                snapshot.forEach(doc => docs.push({ id: doc.id, ...doc.data() }));
-                docs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-                renderHistoryTable(docs);
-            } catch (e) { console.error(e); }
-        } else {
-            renderHistoryTable(localHistory);
-        }
-    }
-
-    globalThis.visualizarRelatorio = function(docId) {
-        const data = window._historyCache.find(d => d.id === docId);
+    window.viewReport = function(id) {
+        const data = window._historyCache.find(d => d.id === id);
         if (data) {
             consolidado = data.consolidado;
             historyContainer.classList.add('hidden');
             resultsArea.classList.remove('hidden');
             renderResults();
-            status.innerText = "Relatório carregado do histórico.";
+            status.innerText = "Histórico carregado.";
             resultsArea.scrollIntoView({ behavior: 'smooth' });
         }
-    }
+    };
 
-    globalThis.imprimirSalvo = function(docId) {
-        const data = window._historyCache.find(d => d.id === docId);
+    window.printReport = function(id) {
+        const data = window._historyCache.find(d => d.id === id);
         if (data) {
             consolidado = data.consolidado;
             renderPrintArea();
             window.print();
         }
-    }
+    };
 
-    async function autoSaveReport() {
+    async function autoSave() {
         const first = Object.values(consolidado)[0];
         const ref = first ? first.periodo : "N/A";
-        const newDoc = {
-            id: 'id_' + Date.now(),
+        const docObj = {
+            id: 'sintegra_' + Date.now(),
             timestamp: Date.now(),
             globalPeriodo: ref,
             consolidado: JSON.parse(JSON.stringify(consolidado))
         };
 
-        localHistory.unshift(newDoc);
-        if (isCloudActive && db) {
+        // Salva Local (Sempre)
+        await saveLocal(docObj);
+
+        // Salva Nuvem (Se houver config)
+        if (db && userId) {
             try {
-                const col = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('history');
-                await col.add(newDoc);
-                loadHistory();
-            } catch (e) { console.warn("Erro ao salvar nuvem."); }
-        } else {
-            renderHistoryTable(localHistory);
+                const appId = window.firebaseData.appId;
+                const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'history');
+                await addDoc(colRef, docObj);
+            } catch (e) { console.warn("Cloud save fail", e); }
         }
+        loadHistory();
     }
 
-    // --- Core: Processamento de PDFs ---
+    // --- PROCESSAMENTO DE PDFS ---
     input.addEventListener('change', (e) => {
         arquivos = Array.from(e.target.files);
         if (arquivos.length > 0) {
@@ -387,31 +455,40 @@
 
     procBtn.onclick = async () => {
         procBtn.disabled = true;
-        procBtn.classList.remove('active');
         consolidado = {};
         resultsArea.innerHTML = "";
         printArea.innerHTML = "";
+        historyContainer.classList.add('hidden');
         resultsArea.classList.remove('hidden');
-        historyContainer.classList.add('hidden'); 
-        
+
         try {
+            const pdfjsLib = window['pdfjs-dist/build/pdf'];
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
             for (let i = 0; i < arquivos.length; i++) {
-                status.innerText = `Lendo arquivo ${i + 1} de ${arquivos.length}...`;
-                const text = await extractText(arquivos[i]);
-                if (text) parseData(text);
+                status.innerText = `Lendo PDF ${i + 1} de ${arquivos.length}...`;
+                const arrayBuffer = await arquivos[i].arrayBuffer();
+                const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+                let fullText = "";
+                for (let p = 1; p <= pdf.numPages; p++) {
+                    const page = await pdf.getPage(p);
+                    const content = await page.getTextContent();
+                    fullText += content.items.map(s => s.str).join("   ") + "   \n";
+                }
+                parseData(fullText);
             }
 
             const cnpjs = Object.keys(consolidado);
             if (cnpjs.length === 0) {
-                status.innerText = "Nenhum CNPJ encontrado.";
+                status.innerText = "Nenhum dado encontrado.";
                 procBtn.disabled = false;
                 return;
             }
 
-            const batchSize = 5;
-            for (let i = 0; i < cnpjs.length; i += batchSize) {
-                const batch = cnpjs.slice(i, i + batchSize);
-                status.innerText = `Consultando empresas... (${Math.min(i + batchSize, cnpjs.length)}/${cnpjs.length})`;
+            // Consultar APIs de regime
+            for (let i = 0; i < cnpjs.length; i += 5) {
+                const batch = cnpjs.slice(i, i + 5);
+                status.innerText = `Consultando empresas... (${Math.min(i + 5, cnpjs.length)}/${cnpjs.length})`;
                 await Promise.all(batch.map(async (cnpj) => {
                     const dados = await consultarDadosEmpresa(cnpj);
                     if (dados) {
@@ -420,31 +497,18 @@
                         consolidado[cnpj].regime = dados.isSimples ? "Simples Nacional" : "Lucro Presumido/Real";
                     }
                 }));
-                if (i + batchSize < cnpjs.length) await new Promise(r => setTimeout(r, 800));
+                if (i + 5 < cnpjs.length) await new Promise(r => setTimeout(r, 800));
             }
 
             renderResults();
             status.innerText = "Processamento finalizado!";
+            printBtn.classList.remove('hidden');
         } catch (error) { 
             console.error(error);
-            status.innerText = "Ocorreu um erro no processamento.";
+            status.innerText = "Erro ao processar.";
         }
         procBtn.disabled = false;
     };
-
-    async function extractText(file) {
-        try {
-            const arrayBuffer = await file.arrayBuffer();
-            const pdf = await pdfjs.getDocument(arrayBuffer).promise;
-            let fullText = "";
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const content = await page.getTextContent();
-                fullText += content.items.map(s => s.str).join("   ") + "   \n   ";
-            }
-            return fullText;
-        } catch (e) { return ""; }
-    }
 
     function parseData(text) {
         const cnpjs = text.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/g) || text.match(/\d{14}/g);
@@ -495,20 +559,17 @@
     async function consultarDadosEmpresa(cnpj) {
         const cleanCnpj = cnpj.replace(/\D/g, '');
         const url = `https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`;
-        for (let t = 1; t <= 3; t++) {
-            try {
-                const response = await fetch(url);
-                if (response.ok) {
-                    const data = await response.json();
-                    return { nome: data.razao_social || data.nome, isSimples: !!data.opcao_pelo_simples };
-                } else if (response.status === 429) await new Promise(r => setTimeout(r, 1500 * t));
-                else break;
-            } catch (e) { await new Promise(r => setTimeout(r, 1000)); }
-        }
+        try {
+            const r = await fetch(url);
+            if (r.ok) {
+                const d = await r.json();
+                return { nome: d.razao_social || d.nome, isSimples: !!d.opcao_pelo_simples };
+            }
+        } catch (e) {}
         return null;
     }
 
-    globalThis.toggleFlag = function(cnpj, uf, flag) {
+    window.toggleFlag = function(cnpj, uf, flag) {
         if (consolidado[cnpj] && consolidado[cnpj].ufs[uf]) {
             consolidado[cnpj].ufs[uf][flag] = !consolidado[cnpj].ufs[uf][flag];
             renderResults(); 
@@ -539,8 +600,8 @@
                         <span class="reason-val">${isSim ? 'Obrigatório' : razao}</span>
                         ${isSim ? `<span class="venc-val">Venc: Dia 15</span>
                                    <div class="toggle-group">
-                                       <div class="toggle-btn ${info.gerado ? 'on-gerado' : ''}" onclick="toggleFlag('${emp.cnpj}', '${uf}', 'gerado')">${info.gerado ? '✓ Gerado' : 'Gerar'}</div>
-                                       <div class="toggle-btn ${info.enviado ? 'on-enviado' : ''}" onclick="toggleFlag('${emp.cnpj}', '${uf}', 'enviado')">${info.enviado ? '✓ Enviado' : 'Enviar'}</div>
+                                       <div class="toggle-btn ${info.gerado ? 'on-gerado' : ''}" onclick="window.toggleFlag('${emp.cnpj}', '${uf}', 'gerado')">${info.gerado ? '✓ Gerado' : 'Gerar'}</div>
+                                       <div class="toggle-btn ${info.enviado ? 'on-enviado' : ''}" onclick="window.toggleFlag('${emp.cnpj}', '${uf}', 'enviado')">${info.enviado ? '✓ Enviado' : 'Enviar'}</div>
                                    </div>` : ''}
                     </div>
                 `;
@@ -561,10 +622,7 @@
             `;
             resultsArea.appendChild(block);
         });
-        if (cnpjsCount() > 0) printBtn.classList.remove('hidden');
     }
-
-    function cnpjsCount() { return Object.keys(consolidado).length; }
 
     function renderPrintArea() {
         printArea.innerHTML = "";
@@ -588,16 +646,19 @@
         });
     }
 
-    // --- Eventos Finais ---
     historyBtn.onclick = () => {
-        const h = historyContainer.classList.toggle('hidden');
-        if (!h) { resultsArea.classList.add('hidden'); loadHistory(); }
-        else { if (cnpjsCount() > 0) resultsArea.classList.remove('hidden'); }
+        historyContainer.classList.remove('hidden');
+        resultsArea.classList.add('hidden');
+        loadHistory();
     };
     
-    printBtn.onclick = async () => { renderPrintArea(); await autoSaveReport(); window.print(); };
+    printBtn.onclick = async () => { 
+        renderPrintArea(); 
+        await autoSave(); 
+        window.print(); 
+    };
+
     setInterval(() => { document.getElementById('clock').innerText = new Date().toLocaleString(); }, 1000);
-    initCloud();
 </script>
 
 </body>
